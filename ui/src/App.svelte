@@ -2,6 +2,7 @@
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import { relaunch } from "@tauri-apps/plugin-process";
   import { check } from "@tauri-apps/plugin-updater";
   import { onDestroy, onMount } from "svelte";
   import logo from "@assets/logo.svg";
@@ -101,7 +102,16 @@
 
       status = `Downloading v${update.version}...`;
       await update.downloadAndInstall();
-      status = `Update installed (v${update.version}). Restart Pullyt to apply it.`;
+
+      const restart = window.confirm(
+        `Update installed (v${update.version}). Restart Pullyt now?`
+      );
+
+      if (restart) {
+        await relaunch();
+      } else {
+        status = `Update installed (v${update.version}). Restart Pullyt to apply it.`;
+      }
     } catch (error) {
       status = `Update check failed: ${String(error)}`;
     } finally {
@@ -132,7 +142,16 @@
 
       status = `Downloading v${update.version}...`;
       await update.downloadAndInstall();
-      status = `Update installed (v${update.version}). Restart Pullyt to apply it.`;
+
+      const restart = window.confirm(
+        `Update installed (v${update.version}). Restart Pullyt now?`
+      );
+
+      if (restart) {
+        await relaunch();
+      } else {
+        status = `Update installed (v${update.version}). Restart Pullyt to apply it.`;
+      }
     } catch (error) {
       console.warn("[updates] silent update check skipped", error);
     } finally {
@@ -195,8 +214,8 @@
 
     try {
       currentVersion = await getVersion();
-      await startApp();
       await checkForUpdatesSilently();
+      await startApp();
     } catch (error) {
       console.error("[startup] startApp failed", error);
       busy = false;

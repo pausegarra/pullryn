@@ -19,6 +19,14 @@
   let dependencyInfo = "";
   let busy = true;
   let checkingUpdates = false;
+  let confirmDialog = {
+    open: false,
+    message: "",
+    title: "",
+    confirmLabel: "Confirm",
+    cancelLabel: "Cancel",
+  };
+  let resolveConfirm;
 
   let unlistenProgress;
   let unlistenComplete;
@@ -36,6 +44,32 @@
 
   function yieldToPaint() {
     return new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  function askForConfirmation(message, options = {}) {
+    confirmDialog = {
+      open: true,
+      message,
+      title: options.title ?? "Update available",
+      confirmLabel: options.confirmLabel ?? "Confirm",
+      cancelLabel: options.cancelLabel ?? "Cancel",
+    };
+
+    return new Promise((resolve) => {
+      resolveConfirm = resolve;
+    });
+  }
+
+  function onConfirmDialog(choice) {
+    if (resolveConfirm) {
+      resolveConfirm(choice);
+      resolveConfirm = undefined;
+    }
+
+    confirmDialog = {
+      ...confirmDialog,
+      open: false,
+    };
   }
 
   const modeOptions = [
@@ -92,8 +126,9 @@
         return;
       }
 
-      const confirmed = window.confirm(
-        `A new version (${update.version}) is available. Download and install now?`
+      const confirmed = await askForConfirmation(
+        `A new version (${update.version}) is available. Download and install now?`,
+        { title: "Install update", confirmLabel: "Install", cancelLabel: "Later" }
       );
 
       if (!confirmed) {
@@ -104,8 +139,9 @@
       status = `Downloading v${update.version}...`;
       await update.downloadAndInstall();
 
-      const restart = window.confirm(
-        `Update installed (v${update.version}). Restart Pullyt now?`
+      const restart = await askForConfirmation(
+        `Update installed (v${update.version}). Restart Pullyt now?`,
+        { title: "Restart required", confirmLabel: "Restart", cancelLabel: "Not now" }
       );
 
       if (restart) {
@@ -133,8 +169,9 @@
       }
 
       status = `Update available: v${update.version}`;
-      const confirmed = window.confirm(
-        `A new version (${update.version}) is available. Download and install now?`
+      const confirmed = await askForConfirmation(
+        `A new version (${update.version}) is available. Download and install now?`,
+        { title: "Install update", confirmLabel: "Install", cancelLabel: "Later" }
       );
 
       if (!confirmed) {
@@ -144,8 +181,9 @@
       status = `Downloading v${update.version}...`;
       await update.downloadAndInstall();
 
-      const restart = window.confirm(
-        `Update installed (v${update.version}). Restart Pullyt now?`
+      const restart = await askForConfirmation(
+        `Update installed (v${update.version}). Restart Pullyt now?`,
+        { title: "Restart required", confirmLabel: "Restart", cancelLabel: "Not now" }
       );
 
       if (restart) {
@@ -234,6 +272,11 @@
   });
 
   onDestroy(() => {
+    if (resolveConfirm) {
+      resolveConfirm(false);
+      resolveConfirm = undefined;
+    }
+
     if (unlistenProgress) {
       unlistenProgress();
     }
@@ -301,3 +344,16 @@
     </footer>
   </section>
 </main>
+
+{#if confirmDialog.open}
+  <div class="confirm-overlay" role="presentation">
+    <section class="confirm-modal" role="dialog" aria-modal="true" aria-label={confirmDialog.title}>
+      <h2>{confirmDialog.title}</h2>
+      <p>{confirmDialog.message}</p>
+      <div class="confirm-actions">
+        <button on:click={() => onConfirmDialog(false)}>{confirmDialog.cancelLabel}</button>
+        <button class="primary" on:click={() => onConfirmDialog(true)}>{confirmDialog.confirmLabel}</button>
+      </div>
+    </section>
+  </div>
+{/if}

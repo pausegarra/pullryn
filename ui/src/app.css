@@ -181,6 +181,42 @@ footer pre {
   padding: 0;
 }
 
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 20, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.confirm-modal {
+  width: min(440px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px;
+  background: var(--panel);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+.confirm-modal h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.confirm-modal p {
+  margin: 12px 0 0;
+  line-height: 1.4;
+}
+
+.confirm-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 @media (max-width: 720px) {
   .logo {
     height: 180px;

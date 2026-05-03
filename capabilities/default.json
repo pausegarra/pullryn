@@ -3,5 +3,10 @@
   "identifier": "default",
   "description": "Default desktop capability",
   "windows": ["main"],
-  "permissions": ["core:default", "core:event:allow-listen", "updater:default"]
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "updater:default",
+    "process:allow-restart"
+  ]
 }

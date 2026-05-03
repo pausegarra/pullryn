@@ -168,10 +168,18 @@ fn start_download(app: AppHandle, payload: DownloadRequestPayload) -> Result<(),
 pub fn run() {
     eprintln!("[startup] tauri_app::run starting");
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let close_window = PredefinedMenuItem::close_window(app, None)?;
             let quit = PredefinedMenuItem::quit(app, None)?;
+            let relaunch_app = MenuItem::with_id(
+                app,
+                "relaunch_app",
+                "Relaunch app",
+                true,
+                None::<&str>,
+            )?;
             let undo = PredefinedMenuItem::undo(app, None)?;
             let redo = PredefinedMenuItem::redo(app, None)?;
             let cut = PredefinedMenuItem::cut(app, None)?;
@@ -185,7 +193,7 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            let file_menu = Submenu::with_items(app, "File", true, &[&close_window, &quit])?;
+            let file_menu = Submenu::with_items(app, "File", true, &[&close_window, &relaunch_app, &quit])?;
             let edit_menu =
                 Submenu::with_items(app, "Edit", true, &[&undo, &redo, &cut, &copy, &paste, &select_all])?;
             let help_menu = Submenu::with_items(app, "Help", true, &[&check_for_updates])?;
@@ -197,6 +205,8 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if event.id().as_ref() == "check_for_updates" {
                 let _ = app.emit("menu-check-for-updates", ());
+            } else if event.id().as_ref() == "relaunch_app" {
+                let _ = app.emit("menu-relaunch-app", ());
             }
         })
         .invoke_handler(tauri::generate_handler![

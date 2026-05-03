@@ -31,6 +31,7 @@
   let unlistenProgress;
   let unlistenComplete;
   let unlistenMenuCheckUpdates;
+  let unlistenMenuRelaunchApp;
 
   function withTimeout(promise, timeoutMs, timeoutMessage) {
     let timer;
@@ -261,6 +262,15 @@
     }
 
     try {
+      unlistenMenuRelaunchApp = await listen("menu-relaunch-app", () => {
+        void relaunch();
+      });
+      console.info("[startup] listen menu-relaunch-app ok");
+    } catch (error) {
+      console.warn("[startup] listen menu-relaunch-app failed", error);
+    }
+
+    try {
       currentVersion = await getVersion();
       await checkForUpdatesSilently();
       await startApp();
@@ -285,6 +295,9 @@
     }
     if (unlistenMenuCheckUpdates) {
       unlistenMenuCheckUpdates();
+    }
+    if (unlistenMenuRelaunchApp) {
+      unlistenMenuRelaunchApp();
     }
   });
 </script>

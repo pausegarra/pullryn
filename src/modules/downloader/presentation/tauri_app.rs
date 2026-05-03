@@ -171,6 +171,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let close_window = PredefinedMenuItem::close_window(app, None)?;
+            let quit = PredefinedMenuItem::quit(app, None)?;
+            let undo = PredefinedMenuItem::undo(app, None)?;
+            let redo = PredefinedMenuItem::redo(app, None)?;
+            let cut = PredefinedMenuItem::cut(app, None)?;
+            let copy = PredefinedMenuItem::copy(app, None)?;
+            let paste = PredefinedMenuItem::paste(app, None)?;
+            let select_all = PredefinedMenuItem::select_all(app, None)?;
             let check_for_updates = MenuItem::with_id(
                 app,
                 "check_for_updates",
@@ -178,9 +185,11 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
-            let file_menu = Submenu::with_items(app, "File", true, &[&close_window])?;
+            let file_menu = Submenu::with_items(app, "File", true, &[&close_window, &quit])?;
+            let edit_menu =
+                Submenu::with_items(app, "Edit", true, &[&undo, &redo, &cut, &copy, &paste, &select_all])?;
             let help_menu = Submenu::with_items(app, "Help", true, &[&check_for_updates])?;
-            let menu = Menu::with_items(app, &[&file_menu, &help_menu])?;
+            let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &help_menu])?;
             app.set_menu(menu)?;
 
             Ok(())

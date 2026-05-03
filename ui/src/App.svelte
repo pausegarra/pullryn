@@ -22,6 +22,7 @@
 
   let unlistenProgress;
   let unlistenComplete;
+  let unlistenMenuCheckUpdates;
 
   function withTimeout(promise, timeoutMs, timeoutMessage) {
     let timer;
@@ -213,6 +214,15 @@
     }
 
     try {
+      unlistenMenuCheckUpdates = await listen("menu-check-for-updates", () => {
+        void onCheckForUpdates();
+      });
+      console.info("[startup] listen menu-check-for-updates ok");
+    } catch (error) {
+      console.warn("[startup] listen menu-check-for-updates failed", error);
+    }
+
+    try {
       currentVersion = await getVersion();
       await checkForUpdatesSilently();
       await startApp();
@@ -229,6 +239,9 @@
     }
     if (unlistenComplete) {
       unlistenComplete();
+    }
+    if (unlistenMenuCheckUpdates) {
+      unlistenMenuCheckUpdates();
     }
   });
 </script>
@@ -275,9 +288,6 @@
     <progress max="1" value={progress}></progress>
 
     <button class="primary" disabled={busy} on:click={onDownload}>{busy ? "Working..." : "Download"}</button>
-    <button disabled={checkingUpdates} on:click={onCheckForUpdates}>
-      {checkingUpdates ? "Checking updates..." : "Check for updates"}
-    </button>
 
     <footer>
       <pre>{dependencyInfo}</pre>

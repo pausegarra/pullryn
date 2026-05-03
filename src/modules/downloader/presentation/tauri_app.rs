@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter};
 
 use crate::modules::downloader::application::use_cases::{
@@ -168,6 +169,27 @@ pub fn run() {
     eprintln!("[startup] tauri_app::run starting");
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            let close_window = PredefinedMenuItem::close_window(app, None)?;
+            let check_for_updates = MenuItem::with_id(
+                app,
+                "check_for_updates",
+                "Check for updates",
+                true,
+                None::<&str>,
+            )?;
+            let file_menu = Submenu::with_items(app, "File", true, &[&close_window])?;
+            let help_menu = Submenu::with_items(app, "Help", true, &[&check_for_updates])?;
+            let menu = Menu::with_items(app, &[&file_menu, &help_menu])?;
+            app.set_menu(menu)?;
+
+            Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "check_for_updates" {
+                let _ = app.emit("menu-check-for-updates", ());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             bootstrap_dependencies,
             open_github,

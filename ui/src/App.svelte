@@ -15,6 +15,7 @@
   let preset = "compatibility";
   let videoQuality = "best";
   let audioQuality = "best";
+  let cookiesFromBrowser = "none";
   let progress = 0;
   let status = "Starting up...";
   let dependencyInfo = "";
@@ -28,6 +29,11 @@
     cancelLabel: "Cancel",
   };
   let resolveConfirm;
+  let infoDialog = {
+    open: false,
+    title: "",
+    message: "",
+  };
 
   let unlistenProgress;
   let unlistenComplete;
@@ -38,6 +44,7 @@
   let isDebugWindow = false;
   let debugLogs = [];
   let lastDebugLogId = 0;
+  let cookieHintShown = false;
 
   function withTimeout(promise, timeoutMs, timeoutMessage) {
     let timer;
@@ -79,6 +86,24 @@
     };
   }
 
+  function closeInfoDialog() {
+    infoDialog = {
+      ...infoDialog,
+      open: false,
+    };
+  }
+
+  function shouldSuggestCookies(errorText) {
+    const value = String(errorText || "").toLowerCase();
+    return (
+      value.includes("sign in to confirm your age") ||
+      value.includes("cookies-from-browser") ||
+      value.includes("login_required") ||
+      value.includes("age-restricted") ||
+      value.includes("without authentication")
+    );
+  }
+
   const modeOptions = [
     { value: "video_with_audio", label: "Video + Audio" },
     { value: "audio_only_mp3", label: "Audio only (MP3)" },
@@ -103,6 +128,15 @@
     { value: "k128", label: "128k" },
   ];
 
+  const cookiesBrowserOptions = [
+    { value: "none", label: "No cookies" },
+    { value: "safari", label: "Safari" },
+    { value: "chrome", label: "Chrome" },
+    { value: "firefox", label: "Firefox" },
+    { value: "brave", label: "Brave" },
+    { value: "edge", label: "Edge" },
+  ];
+
   async function startApp() {
     busy = true;
     status = "Bootstrapping dependencies...";
@@ -111,7 +145,7 @@
     try {
       const startedAt = Date.now();
       const report = await invoke("bootstrap_dependencies");
-      dependencyInfo = `Dependencies\nyt-dlp: ${report.ytDlp}\nffmpeg: ${report.ffmpeg}\nffprobe: ${report.ffprobe}`;
+      dependencyInfo = `Dependencies\nyt-dlp: ${report.ytDlp}\nffmpeg: ${report.ffmpeg}\nffprobe: ${report.ffprobe}\njs runtime: ${report.jsRuntime}`;
       status = "Ready";
       console.info(`[startup] bootstrap dependencies finished in ${Date.now() - startedAt}ms`, report);
     } catch (error) {
@@ -209,6 +243,7 @@
     busy = true;
     progress = 0;
     status = "Preparing download...";
+    cookieHintShown = false;
 
     try {
       await invoke("start_download", {
@@ -218,6 +253,7 @@
           preset,
           videoQuality,
           audioQuality,
+          cookiesFromBrowser,
         },
       });
     } catch (error) {
@@ -268,6 +304,15 @@
       unlistenProgress = await listen("download-progress", (event) => {
         progress = event.payload.fraction;
         status = event.payload.message;
+        if (!cookieHintShown && shouldSuggestCookies(event.payload.message)) {
+          cookieHintShown = true;
+          infoDialog = {
+            open: true,
+            title: "Authentication required",
+            message:
+              "This video may be age-restricted or require sign-in. Set Cookies to your browser (for example Brave/Safari/Chrome) and try again.",
+          };
+        }
       });
       console.info("[startup] listen download-progress ok");
     } catch (error) {
@@ -281,7 +326,17 @@
           progress = 1;
           status = "Finished";
         } else {
-          status = `Download failed: ${event.payload.error}`;
+          const errorText = String(event.payload.error || "");
+          status = `Download failed: ${errorText}`;
+          if (!cookieHintShown && shouldSuggestCookies(errorText)) {
+            cookieHintShown = true;
+            infoDialog = {
+              open: true,
+              title: "Authentication required",
+              message:
+                "This video requires authentication. Set Cookies to your browser (for example Brave/Safari/Chrome) and try again.",
+            };
+          }
         }
       });
       console.info("[startup] listen download-complete ok");
@@ -387,6 +442,23 @@
       {/each}
     </div>
 
+    <div class="row">
+      <span class="field with-help">
+        Cookies
+        <button type="button" class="help" aria-label="Cookies help">
+          i
+          <span class="tooltip">
+            Optional. Use this when a video is age-restricted or asks for sign-in. It lets yt-dlp reuse your browser session to access protected videos. Many public videos work without it.
+          </span>
+        </button>
+      </span>
+      <select bind:value={cookiesFromBrowser}>
+        {#each cookiesBrowserOptions as option}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
+    </div>
+
     <p class="status">{status}</p>
 
     <progress max="1" value={progress}></progress>
@@ -405,6 +477,18 @@
     </footer>
   </section>
 </main>
+{/if}
+
+{#if infoDialog.open}
+  <div class="confirm-overlay" role="presentation">
+    <section class="confirm-modal" role="dialog" aria-modal="true" aria-label={infoDialog.title}>
+      <h2>{infoDialog.title}</h2>
+      <p>{infoDialog.message}</p>
+      <div class="confirm-actions">
+        <button class="primary" on:click={closeInfoDialog}>Got it</button>
+      </div>
+    </section>
+  </div>
 {/if}
 
 {#if confirmDialog.open}

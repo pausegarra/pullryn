@@ -6,20 +6,7 @@ use pullyt::modules::downloader::domain::entities::{
     VideoQuality,
 };
 use pullyt::modules::downloader::domain::errors::DownloaderError;
-use pullyt::modules::downloader::domain::ports::{DependencyPort, DownloadPort, SaveDialogPort};
-
-struct OkDeps;
-impl DependencyPort for OkDeps {
-    fn ensure_yt_dlp(&self) -> Result<String, DownloaderError> {
-        Ok("yt-dlp".to_string())
-    }
-    fn ensure_ffmpeg(&self) -> Result<String, DownloaderError> {
-        Ok("ffmpeg".to_string())
-    }
-    fn ensure_ffprobe(&self) -> Result<String, DownloaderError> {
-        Ok("ffprobe".to_string())
-    }
-}
+use pullyt::modules::downloader::domain::ports::{DownloadPort, SaveDialogPort};
 
 struct FakeDialog;
 impl SaveDialogPort for FakeDialog {
@@ -55,7 +42,7 @@ impl DownloadPort for FakeDownload {
 
 #[test]
 fn rejects_invalid_url() {
-    let use_case = DownloadMediaUseCase::new(Arc::new(OkDeps), Arc::new(FakeDialog), Arc::new(FakeDownload));
+    let use_case = DownloadMediaUseCase::new(Arc::new(FakeDialog), Arc::new(FakeDownload));
     let request = DownloadRequest {
         provider: Provider::YouTube,
         mode: DownloadMode::VideoWithAudio,
@@ -65,6 +52,6 @@ fn rejects_invalid_url() {
         url: "https://example.com/not-youtube".to_string(),
         output_path: String::new(),
     };
-    let result = use_case.execute(request, &mut |_| {});
+    let result = use_case.execute(request, "ffmpeg", &mut |_| {});
     assert!(matches!(result, Err(DownloaderError::InvalidUrl)));
 }

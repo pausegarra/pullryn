@@ -26,6 +26,7 @@ impl DownloadPort for FakeDownload {
         &self,
         _request: &DownloadRequest,
         _ffmpeg_path: &str,
+        _js_runtime: &str,
         on_progress: &mut dyn FnMut(DownloadProgress),
     ) -> Result<(), DownloaderError> {
         on_progress(DownloadProgress {
@@ -35,7 +36,12 @@ impl DownloadPort for FakeDownload {
         Ok(())
     }
 
-    fn get_title(&self, _url: &str) -> Result<String, DownloaderError> {
+    fn get_title(
+        &self,
+        _url: &str,
+        _cookies_from_browser: Option<&str>,
+        _js_runtime: &str,
+    ) -> Result<String, DownloaderError> {
         Ok("Test Video Title".to_string())
     }
 }
@@ -51,7 +57,8 @@ fn rejects_invalid_url() {
         audio_quality: AudioQuality::Best,
         url: "https://example.com/not-youtube".to_string(),
         output_path: String::new(),
+        cookies_from_browser: None,
     };
-    let result = use_case.execute(request, "ffmpeg", &mut |_| {});
+    let result = use_case.execute(request, "ffmpeg", "deno", &mut |_| {});
     assert!(matches!(result, Err(DownloaderError::InvalidUrl)));
 }

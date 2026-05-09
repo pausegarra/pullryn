@@ -27,6 +27,7 @@ pub struct DownloadRequestPayload {
     preset: String,
     video_quality: String,
     audio_quality: String,
+    cookies_from_browser: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -35,6 +36,7 @@ struct DependencyReportPayload {
     yt_dlp: String,
     ffmpeg: String,
     ffprobe: String,
+    js_runtime: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,7 +85,17 @@ impl DownloadRequestPayload {
             audio_quality: parse_audio_quality(&self.audio_quality)?,
             url: self.url,
             output_path: String::new(),
+            cookies_from_browser: parse_cookies_from_browser(&self.cookies_from_browser),
         })
+    }
+}
+
+fn parse_cookies_from_browser(value: &str) -> Option<String> {
+    let normalized = value.trim().to_lowercase();
+    if normalized.is_empty() || normalized == "none" {
+        None
+    } else {
+        Some(normalized)
     }
 }
 
@@ -136,6 +148,7 @@ async fn bootstrap_dependencies() -> Result<DependencyReportPayload, String> {
                 yt_dlp: report.yt_dlp,
                 ffmpeg: report.ffmpeg,
                 ffprobe: report.ffprobe,
+                js_runtime: report.js_runtime,
             })
             .map_err(|e| e.to_string())
     })
@@ -147,10 +160,11 @@ async fn bootstrap_dependencies() -> Result<DependencyReportPayload, String> {
         *guard = Some(report.clone());
     }
     debug_log!(
-        "[deps] bootstrap_dependencies: completed yt_dlp={} ffmpeg={} ffprobe={}",
+        "[deps] bootstrap_dependencies: completed yt_dlp={} ffmpeg={} ffprobe={} js_runtime={}",
         report.yt_dlp,
         report.ffmpeg,
-        report.ffprobe
+        report.ffprobe,
+        report.js_runtime
     );
     Ok(report)
 }
@@ -179,13 +193,18 @@ fn start_download(app: AppHandle, payload: DownloadRequestPayload) -> Result<(),
         .ok()
         .and_then(|guard| guard.as_ref().map(|deps| deps.ffmpeg.clone()))
         .ok_or_else(|| "dependencies not bootstrapped; restart app".to_string())?;
+    let js_runtime = deps_state()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|deps| deps.js_runtime.clone()))
+        .ok_or_else(|| "dependencies not bootstrapped; restart app".to_string())?;
 
     tauri::async_runtime::spawn(async move {
         let save = Arc::new(NativeSaveDialog);
         let yt_dlp = Arc::new(YtDlpAdapter);
         let use_case = DownloadMediaUseCase::new(save, yt_dlp);
 
-        let result = use_case.execute(request, &ffmpeg_path, &mut |progress| {
+        let result = use_case.execute(request, &ffmpeg_path, &js_runtime, &mut |progress| {
             let payload: DownloadProgressPayload = progress.into();
             let _ = app.emit("download-progress", payload);
         });

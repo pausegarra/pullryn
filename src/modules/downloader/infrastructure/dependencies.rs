@@ -99,6 +99,32 @@ impl DependencyPort for SystemDependencies {
             Err(DownloaderError::FfprobeUnavailable)
         }
     }
+
+    fn ensure_js_runtime(&self) -> Result<String, DownloaderError> {
+        if command_works("deno") {
+            debug_log!("[deps] ensure_js_runtime using PATH deno");
+            return Ok("deno".to_string());
+        }
+
+        if local_deno_path().exists() && command_works_with_arg(&local_deno_path().display().to_string(), "--version") {
+            let path = local_deno_path().display().to_string();
+            debug_log!("[deps] ensure_js_runtime using local {}", path);
+            return Ok(format!("deno:{path}"));
+        }
+
+        debug_log!("[deps] ensure_js_runtime installing local deno");
+        install_local_deno()?;
+
+        if command_works("deno") {
+            Ok("deno".to_string())
+        } else if local_deno_path().exists()
+            && command_works_with_arg(&local_deno_path().display().to_string(), "--version")
+        {
+            Ok(format!("deno:{}", local_deno_path().display()))
+        } else {
+            Err(DownloaderError::ProcessFailed("js runtime unavailable".to_string()))
+        }
+    }
 }
 
 pub fn yt_dlp_command() -> String {
@@ -322,6 +348,74 @@ fn local_ffprobe_path() -> PathBuf {
     {
         local_bin_dir().join("ffprobe")
     }
+}
+
+fn local_deno_path() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        return local_bin_dir().join("deno.exe");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        local_bin_dir().join("deno")
+    }
+}
+
+fn install_local_deno() -> Result<(), DownloaderError> {
+    let archive = download_bytes(deno_download_url())?;
+    let mut zip = ZipArchive::new(Cursor::new(archive))
+        .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
+
+    #[cfg(target_os = "windows")]
+    let deno_name = "deno.exe";
+    #[cfg(not(target_os = "windows"))]
+    let deno_name = "deno";
+
+    extract_zip_file_exact_any_os(&mut zip, deno_name, &local_deno_path())?;
+    set_executable(&local_deno_path())?;
+    Ok(())
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn deno_download_url() -> &'static str {
+    "https://github.com/denoland/deno/releases/latest/download/deno-aarch64-apple-darwin.zip"
+}
+
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+fn deno_download_url() -> &'static str {
+    "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-apple-darwin.zip"
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn deno_download_url() -> &'static str {
+    "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip"
+}
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+fn deno_download_url() -> &'static str {
+    "https://github.com/denoland/deno/releases/latest/download/deno-aarch64-unknown-linux-gnu.zip"
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+fn deno_download_url() -> &'static str {
+    "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
+}
+
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+fn deno_download_url() -> &'static str {
+    "https://github.com/denoland/deno/releases/latest/download/deno-aarch64-pc-windows-msvc.zip"
+}
+
+#[cfg(not(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "macos", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "aarch64"),
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "windows", target_arch = "aarch64")
+)))]
+fn deno_download_url() -> &'static str {
+    "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-apple-darwin.zip"
 }
 
 fn local_ffmpeg_license_path() -> PathBuf {
@@ -650,6 +744,33 @@ fn extract_zip_file(
 
 #[cfg(target_os = "macos")]
 fn extract_zip_file_exact(
+    zip: &mut ZipArchive<Cursor<Vec<u8>>>,
+    file_name: &str,
+    target: &Path,
+) -> Result<(), DownloaderError> {
+    for i in 0..zip.len() {
+        let mut file = zip
+            .by_index(i)
+            .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
+        let leaf = Path::new(file.name())
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if leaf == file_name {
+            let mut data = Vec::new();
+            file.read_to_end(&mut data)
+                .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
+            write_file(target, &data)?;
+            return Ok(());
+        }
+    }
+
+    Err(DownloaderError::ProcessFailed(format!(
+        "missing file in zip: {file_name}"
+    )))
+}
+
+fn extract_zip_file_exact_any_os(
     zip: &mut ZipArchive<Cursor<Vec<u8>>>,
     file_name: &str,
     target: &Path,

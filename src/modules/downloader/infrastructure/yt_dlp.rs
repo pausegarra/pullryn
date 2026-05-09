@@ -15,7 +15,7 @@ pub struct YtDlpAdapter;
 fn get_title_impl(url: &str) -> Result<String, DownloaderError> {
     let cmd = yt_dlp_command();
     debug_log!("[yt-dlp] get_title start cmd={} url={}", cmd, url);
-    let output = std::process::Command::new(&cmd)
+    let output = command_with_hidden_window(std::process::Command::new(&cmd))
         .args(["--flat-playlist", "--print", "%(title)s", url])
         .output()
         .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
@@ -53,7 +53,7 @@ impl DownloadPort for YtDlpAdapter {
             message: "Starting download".to_string(),
         });
 
-        let mut cmd = Command::new(yt_dlp_command());
+        let mut cmd = command_with_hidden_window(Command::new(yt_dlp_command()));
         debug_log!(
             "[yt-dlp] run_download start url={} out={} mode={:?} preset={:?} vq={:?} aq={:?} ffmpeg={}",
             request.url,
@@ -136,6 +136,19 @@ impl DownloadPort for YtDlpAdapter {
     fn get_title(&self, url: &str) -> Result<String, DownloaderError> {
         get_title_impl(url)
     }
+}
+
+fn command_with_hidden_window(command: Command) -> Command {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut command = command;
+        command.creation_flags(CREATE_NO_WINDOW);
+        return command;
+    }
+
+    command
 }
 
 fn video_audio_format(video: VideoQuality, audio: AudioQuality, preset: DownloadPreset) -> String {

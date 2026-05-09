@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::debug_log;
 use crate::modules::downloader::domain::entities::{DownloadProgress, DownloadRequest, UpdateStatus};
 use crate::modules::downloader::domain::errors::DownloaderError;
 use crate::modules::downloader::domain::ports::{DependencyPort, DownloadPort, ReleasePort, SaveDialogPort};
@@ -22,15 +23,15 @@ impl BootstrapDependenciesUseCase {
     }
 
     pub fn execute(&self) -> Result<DependencyReport, DownloaderError> {
-        eprintln!("[deps] bootstrap: ensure yt-dlp");
+        debug_log!("[deps] bootstrap: ensure yt-dlp");
         let yt_dlp = self.dependency_port.ensure_yt_dlp()?;
-        eprintln!("[deps] bootstrap: yt-dlp ready at {yt_dlp}");
-        eprintln!("[deps] bootstrap: ensure ffmpeg");
+        debug_log!("[deps] bootstrap: yt-dlp ready at {yt_dlp}");
+        debug_log!("[deps] bootstrap: ensure ffmpeg");
         let ffmpeg = self.dependency_port.ensure_ffmpeg()?;
-        eprintln!("[deps] bootstrap: ffmpeg ready at {ffmpeg}");
-        eprintln!("[deps] bootstrap: ensure ffprobe");
+        debug_log!("[deps] bootstrap: ffmpeg ready at {ffmpeg}");
+        debug_log!("[deps] bootstrap: ensure ffprobe");
         let ffprobe = self.dependency_port.ensure_ffprobe()?;
-        eprintln!("[deps] bootstrap: ffprobe ready at {ffprobe}");
+        debug_log!("[deps] bootstrap: ffprobe ready at {ffprobe}");
         Ok(DependencyReport {
             yt_dlp,
             ffmpeg,
@@ -40,19 +41,13 @@ impl BootstrapDependenciesUseCase {
 }
 
 pub struct DownloadMediaUseCase {
-    dependency_port: Arc<dyn DependencyPort>,
     save_dialog_port: Arc<dyn SaveDialogPort>,
     download_port: Arc<dyn DownloadPort>,
 }
 
 impl DownloadMediaUseCase {
-    pub fn new(
-        dependency_port: Arc<dyn DependencyPort>,
-        save_dialog_port: Arc<dyn SaveDialogPort>,
-        download_port: Arc<dyn DownloadPort>,
-    ) -> Self {
+    pub fn new(save_dialog_port: Arc<dyn SaveDialogPort>, download_port: Arc<dyn DownloadPort>) -> Self {
         Self {
-            dependency_port,
             save_dialog_port,
             download_port,
         }
@@ -61,6 +56,7 @@ impl DownloadMediaUseCase {
     pub fn execute(
         &self,
         mut request: DownloadRequest,
+        ffmpeg_path: &str,
         on_progress: &mut dyn FnMut(DownloadProgress),
     ) -> Result<(), DownloaderError> {
         let valid = YoutubeUrl::parse(&request.url)?;
@@ -68,11 +64,8 @@ impl DownloadMediaUseCase {
 
         on_progress(DownloadProgress {
             fraction: 0.0,
-            message: "Checking dependencies".to_string(),
+            message: "Preparing download".to_string(),
         });
-        self.dependency_port.ensure_yt_dlp()?;
-        let ffmpeg_path = self.dependency_port.ensure_ffmpeg()?;
-        self.dependency_port.ensure_ffprobe()?;
 
         let title = self.download_port.get_title(&request.url).unwrap_or_default();
 
@@ -83,7 +76,7 @@ impl DownloadMediaUseCase {
         request.output_path = out;
 
         self.download_port
-            .run_download(&request, &ffmpeg_path, on_progress)
+            .run_download(&request, ffmpeg_path, on_progress)
     }
 }
 

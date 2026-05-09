@@ -14,6 +14,7 @@ use tar::Archive;
 use xz2::read::XzDecoder;
 use zip::ZipArchive;
 
+use crate::debug_log;
 use crate::modules::downloader::domain::errors::DownloaderError;
 use crate::modules::downloader::domain::ports::DependencyPort;
 
@@ -23,24 +24,52 @@ pub struct SystemDependencies;
 
 impl DependencyPort for SystemDependencies {
     fn ensure_yt_dlp(&self) -> Result<String, DownloaderError> {
+        debug_log!(
+            "[deps] ensure_yt_dlp home={} local_path={} exists={}",
+            home_dir().display(),
+            local_yt_dlp_path().display(),
+            local_yt_dlp_path().exists()
+        );
         if command_works("yt-dlp") {
+            debug_log!("[deps] ensure_yt_dlp using PATH yt-dlp");
             return Ok("yt-dlp".to_string());
         }
         if local_yt_dlp_path().exists() {
-            return Ok(local_yt_dlp_path().display().to_string());
+            if local_yt_dlp_works() {
+                debug_log!("[deps] ensure_yt_dlp using local {}", local_yt_dlp_path().display());
+                return Ok(local_yt_dlp_path().display().to_string());
+            }
+
+            debug_log!(
+                "[deps] ensure_yt_dlp local exists but not runnable {}; reinstalling",
+                local_yt_dlp_path().display()
+            );
         }
+        debug_log!("[deps] ensure_yt_dlp local missing; installing");
         install_local_yt_dlp()?;
         if command_works("yt-dlp") {
+            debug_log!("[deps] ensure_yt_dlp install done; PATH yt-dlp available");
             Ok("yt-dlp".to_string())
-        } else if local_yt_dlp_path().exists() {
+        } else if local_yt_dlp_path().exists() && local_yt_dlp_works() {
+            debug_log!(
+                "[deps] ensure_yt_dlp install done; local available {}",
+                local_yt_dlp_path().display()
+            );
             Ok(local_yt_dlp_path().display().to_string())
         } else {
+            debug_log!("[deps] ensure_yt_dlp failed after install");
             Err(DownloaderError::YtDlpUnavailable)
         }
     }
 
     fn ensure_ffmpeg(&self) -> Result<String, DownloaderError> {
+        debug_log!(
+            "[deps] ensure_ffmpeg local_path={} exists={}",
+            local_ffmpeg_path().display(),
+            local_ffmpeg_path().exists()
+        );
         if ffmpeg_command_works("ffmpeg") {
+            debug_log!("[deps] ensure_ffmpeg using PATH ffmpeg");
             return Ok("ffmpeg".to_string());
         }
 
@@ -53,7 +82,13 @@ impl DependencyPort for SystemDependencies {
     }
 
     fn ensure_ffprobe(&self) -> Result<String, DownloaderError> {
+        debug_log!(
+            "[deps] ensure_ffprobe local_path={} exists={}",
+            local_ffprobe_path().display(),
+            local_ffprobe_path().exists()
+        );
         if ffmpeg_command_works("ffprobe") {
+            debug_log!("[deps] ensure_ffprobe using PATH ffprobe");
             return Ok("ffprobe".to_string());
         }
 
@@ -68,18 +103,26 @@ impl DependencyPort for SystemDependencies {
 
 pub fn yt_dlp_command() -> String {
     if command_works("yt-dlp") {
-        "yt-dlp".to_string()
+        let cmd = "yt-dlp".to_string();
+        debug_log!("[deps] yt_dlp_command selected={}", cmd);
+        cmd
     } else {
-        local_yt_dlp_path().display().to_string()
+        let cmd = local_yt_dlp_path().display().to_string();
+        debug_log!("[deps] yt_dlp_command selected={}", cmd);
+        cmd
     }
 }
 
 fn command_works(name: &str) -> bool {
-    command_works_with_arg(name, "--version")
+    let ok = command_works_with_arg(name, "--version");
+    debug_log!("[deps] command_works name={} ok={}", name, ok);
+    ok
 }
 
 fn ffmpeg_command_works(name: &str) -> bool {
-    command_works_with_arg(name, "-version")
+    let ok = command_works_with_arg(name, "-version");
+    debug_log!("[deps] ffmpeg_command_works name={} ok={}", name, ok);
+    ok
 }
 
 fn command_works_with_arg(name: &str, arg: &str) -> bool {
@@ -161,6 +204,7 @@ fn install_local_yt_dlp() -> Result<(), DownloaderError> {
     let bin_dir = local_bin_dir();
     fs::create_dir_all(&bin_dir).map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
     let target = local_yt_dlp_path();
+    debug_log!("[deps] install_local_yt_dlp target={}", target.display());
 
     #[cfg(target_os = "windows")]
     {
@@ -174,27 +218,37 @@ fn install_local_yt_dlp() -> Result<(), DownloaderError> {
             .status()
             .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
         if !status.success() {
+            debug_log!("[deps] install_local_yt_dlp powershell failed status={}", status);
             return Err(DownloaderError::YtDlpUnavailable);
         }
     }
 
     #[cfg(not(target_os = "windows"))]
     {
+        let download_url = yt_dlp_download_url();
+        debug_log!("[deps] install_local_yt_dlp url={}", download_url);
+
         let status = command_with_hidden_window(Command::new("curl"))
             .args([
                 "-L",
-                "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp",
+                download_url,
                 "-o",
             ])
             .arg(target.display().to_string())
             .status()
             .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
         if !status.success() {
+            debug_log!("[deps] install_local_yt_dlp curl failed status={}", status);
             return Err(DownloaderError::YtDlpUnavailable);
         }
         let _ = command_with_hidden_window(Command::new("chmod"))
             .args(["+x", &target.display().to_string()])
             .status();
+
+        #[cfg(target_os = "macos")]
+        {
+            clear_quarantine(&target);
+        }
     }
 
     Ok(())
@@ -234,6 +288,20 @@ fn local_yt_dlp_path() -> PathBuf {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn yt_dlp_download_url() -> &'static str {
+    "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+}
+
+#[cfg(not(target_os = "macos"))]
+fn yt_dlp_download_url() -> &'static str {
+    "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+}
+
+fn local_yt_dlp_works() -> bool {
+    command_works_with_arg(&local_yt_dlp_path().display().to_string(), "--version")
+}
+
 fn local_ffmpeg_path() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
@@ -265,7 +333,7 @@ fn local_ffmpeg_readme_path() -> PathBuf {
 }
 
 fn download_bytes(url: &str) -> Result<Vec<u8>, DownloaderError> {
-    eprintln!("[deps] download start: {url}");
+    debug_log!("[deps] download start: {url}");
     let started = Instant::now();
 
     let tmp_path = local_bin_dir().join(".download_tmp");
@@ -323,7 +391,7 @@ fn download_bytes(url: &str) -> Result<Vec<u8>, DownloaderError> {
     let _ = fs::remove_file(&tmp_path);
 
     let elapsed = started.elapsed();
-    eprintln!(
+    debug_log!(
         "[deps] download complete: {url} ({} bytes in {:.1}s)",
         data.len(),
         elapsed.as_secs_f64()
@@ -341,13 +409,29 @@ fn set_executable(path: &Path) -> Result<(), DownloaderError> {
     fs::set_permissions(path, perms).map_err(|e| DownloaderError::ProcessFailed(e.to_string()))
 }
 
+#[cfg(target_os = "macos")]
+fn clear_quarantine(path: &Path) {
+    let _ = command_with_hidden_window(Command::new("xattr"))
+        .arg("-d")
+        .arg("com.apple.quarantine")
+        .arg(path)
+        .status();
+}
+
 #[cfg(not(unix))]
 fn set_executable(_path: &Path) -> Result<(), DownloaderError> {
     Ok(())
 }
 
 fn write_file(path: &Path, data: &[u8]) -> Result<(), DownloaderError> {
-    fs::write(path, data).map_err(|e| DownloaderError::ProcessFailed(e.to_string()))
+    fs::write(path, data).map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
+
+    #[cfg(target_os = "macos")]
+    {
+        clear_quarantine(path);
+    }
+
+    Ok(())
 }
 
 fn command_with_hidden_window(command: Command) -> Command {

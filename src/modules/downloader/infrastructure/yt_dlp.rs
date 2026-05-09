@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::process::{Command, Stdio};
 
 use crate::debug_log;
@@ -12,18 +12,30 @@ use super::dependencies::yt_dlp_command;
 
 pub struct YtDlpAdapter;
 
-fn get_title_impl(url: &str) -> Result<String, DownloaderError> {
+fn get_title_impl(
+    url: &str,
+    cookies_from_browser: Option<&str>,
+    js_runtime: &str,
+) -> Result<String, DownloaderError> {
     let cmd = yt_dlp_command();
     debug_log!("[yt-dlp] get_title start cmd={} url={}", cmd, url);
-    let output = command_with_hidden_window(std::process::Command::new(&cmd))
-        .args(["--flat-playlist", "--print", "%(title)s", url])
+    let mut command = command_with_hidden_window(std::process::Command::new(&cmd));
+    command.args(["--ignore-config", "--flat-playlist", "--print", "%(title)s"]);
+    append_cookies_from_browser(&mut command, cookies_from_browser);
+    append_js_runtime(&mut command, js_runtime);
+    command.arg(url);
+    let output = command
         .output()
         .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
 
     if !output.status.success() {
         debug_log!("[yt-dlp] get_title failed status={}", output.status);
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !stderr.trim().is_empty() {
+            debug_log!("[yt-dlp] get_title stderr={}", stderr.trim());
+        }
         return Err(DownloaderError::ProcessFailed(
-            String::from_utf8_lossy(&output.stderr).to_string(),
+            stderr,
         ));
     }
 
@@ -46,6 +58,7 @@ impl DownloadPort for YtDlpAdapter {
         &self,
         request: &DownloadRequest,
         ffmpeg_path: &str,
+        js_runtime: &str,
         on_progress: &mut dyn FnMut(DownloadProgress),
     ) -> Result<(), DownloaderError> {
         on_progress(DownloadProgress {
@@ -65,14 +78,18 @@ impl DownloadPort for YtDlpAdapter {
             ffmpeg_path
         );
         cmd.arg("--newline")
+            .arg("--ignore-config")
             .arg("--progress")
             .arg("--ffmpeg-location")
             .arg(ffmpeg_path)
             .arg("-o")
             .arg(&request.output_path)
-            .arg(&request.url)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        append_cookies_from_browser(&mut cmd, request.cookies_from_browser.as_deref());
+        append_js_runtime(&mut cmd, js_runtime);
+        cmd.arg(&request.url);
 
         match request.mode {
             DownloadMode::AudioOnlyMp3 => {
@@ -126,15 +143,45 @@ impl DownloadPort for YtDlpAdapter {
             });
             Ok(())
         } else {
+            let mut stderr_text = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut stderr_text);
+            }
+            let stderr_trimmed = stderr_text.trim().to_string();
+            if !stderr_text.trim().is_empty() {
+                debug_log!("[yt-dlp] run_download stderr={}", stderr_text.trim());
+            }
             debug_log!("[yt-dlp] run_download failed status={}", status);
-            Err(DownloaderError::ProcessFailed(format!(
-                "yt-dlp exited with {status}"
-            )))
+            let message = if stderr_trimmed.is_empty() {
+                format!("yt-dlp exited with {status}")
+            } else {
+                format!("yt-dlp exited with {status}: {stderr_trimmed}")
+            };
+            Err(DownloaderError::ProcessFailed(message))
         }
     }
 
-    fn get_title(&self, url: &str) -> Result<String, DownloaderError> {
-        get_title_impl(url)
+    fn get_title(
+        &self,
+        url: &str,
+        cookies_from_browser: Option<&str>,
+        js_runtime: &str,
+    ) -> Result<String, DownloaderError> {
+        get_title_impl(url, cookies_from_browser, js_runtime)
+    }
+}
+
+fn append_cookies_from_browser(cmd: &mut Command, cookies_from_browser: Option<&str>) {
+    if let Some(browser) = cookies_from_browser {
+        if !browser.trim().is_empty() {
+            cmd.arg("--cookies-from-browser").arg(browser);
+        }
+    }
+}
+
+fn append_js_runtime(cmd: &mut Command, js_runtime: &str) {
+    if !js_runtime.trim().is_empty() {
+        cmd.arg("--js-runtimes").arg(js_runtime);
     }
 }
 

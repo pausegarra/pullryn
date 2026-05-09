@@ -5,6 +5,7 @@ pub trait DependencyPort: Send + Sync {
     fn ensure_yt_dlp(&self) -> Result<String, DownloaderError>;
     fn ensure_ffmpeg(&self) -> Result<String, DownloaderError>;
     fn ensure_ffprobe(&self) -> Result<String, DownloaderError>;
+    fn ensure_js_runtime(&self) -> Result<String, DownloaderError>;
 }
 
 pub trait SaveDialogPort: Send + Sync {
@@ -21,10 +22,16 @@ pub trait DownloadPort: Send + Sync {
         &self,
         request: &DownloadRequest,
         ffmpeg_path: &str,
+        js_runtime: &str,
         on_progress: &mut dyn FnMut(DownloadProgress),
     ) -> Result<(), DownloaderError>;
 
-    fn get_title(&self, url: &str) -> Result<String, DownloaderError>;
+    fn get_title(
+        &self,
+        url: &str,
+        cookies_from_browser: Option<&str>,
+        js_runtime: &str,
+    ) -> Result<String, DownloaderError>;
 }
 
 pub trait ReleasePort: Send + Sync {

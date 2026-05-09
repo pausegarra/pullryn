@@ -46,6 +46,7 @@ pub struct DownloadRequest {
     pub audio_quality: AudioQuality,
     pub url: String,
     pub output_path: String,
+    pub cookies_from_browser: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

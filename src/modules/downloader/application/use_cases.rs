@@ -11,6 +11,7 @@ pub struct DependencyReport {
     pub yt_dlp: String,
     pub ffmpeg: String,
     pub ffprobe: String,
+    pub js_runtime: String,
 }
 
 pub struct BootstrapDependenciesUseCase {
@@ -32,10 +33,14 @@ impl BootstrapDependenciesUseCase {
         debug_log!("[deps] bootstrap: ensure ffprobe");
         let ffprobe = self.dependency_port.ensure_ffprobe()?;
         debug_log!("[deps] bootstrap: ffprobe ready at {ffprobe}");
+        debug_log!("[deps] bootstrap: ensure js runtime");
+        let js_runtime = self.dependency_port.ensure_js_runtime()?;
+        debug_log!("[deps] bootstrap: js runtime ready at {js_runtime}");
         Ok(DependencyReport {
             yt_dlp,
             ffmpeg,
             ffprobe,
+            js_runtime,
         })
     }
 }
@@ -57,6 +62,7 @@ impl DownloadMediaUseCase {
         &self,
         mut request: DownloadRequest,
         ffmpeg_path: &str,
+        js_runtime: &str,
         on_progress: &mut dyn FnMut(DownloadProgress),
     ) -> Result<(), DownloaderError> {
         let valid = YoutubeUrl::parse(&request.url)?;
@@ -67,7 +73,21 @@ impl DownloadMediaUseCase {
             message: "Preparing download".to_string(),
         });
 
-        let title = self.download_port.get_title(&request.url).unwrap_or_default();
+        let title = match self.download_port.get_title(
+            &request.url,
+            request.cookies_from_browser.as_deref(),
+            js_runtime,
+        ) {
+            Ok(title) => title,
+            Err(err) => {
+                debug_log!("[yt-dlp] get_title warning: {}", err);
+                on_progress(DownloadProgress {
+                    fraction: 0.1,
+                    message: format!("Title lookup warning: {err}"),
+                });
+                return Err(err);
+            }
+        };
 
         let out = self
             .save_dialog_port
@@ -76,7 +96,7 @@ impl DownloadMediaUseCase {
         request.output_path = out;
 
         self.download_port
-            .run_download(&request, ffmpeg_path, on_progress)
+            .run_download(&request, ffmpeg_path, js_runtime, on_progress)
     }
 }
 

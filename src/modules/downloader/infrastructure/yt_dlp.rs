@@ -1,6 +1,7 @@
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 
+use crate::debug_log;
 use crate::modules::downloader::domain::entities::{
     AudioQuality, DownloadMode, DownloadPreset, DownloadProgress, DownloadRequest, VideoQuality,
 };
@@ -12,12 +13,15 @@ use super::dependencies::yt_dlp_command;
 pub struct YtDlpAdapter;
 
 fn get_title_impl(url: &str) -> Result<String, DownloaderError> {
-    let output = std::process::Command::new(yt_dlp_command())
+    let cmd = yt_dlp_command();
+    debug_log!("[yt-dlp] get_title start cmd={} url={}", cmd, url);
+    let output = std::process::Command::new(&cmd)
         .args(["--flat-playlist", "--print", "%(title)s", url])
         .output()
         .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
 
     if !output.status.success() {
+        debug_log!("[yt-dlp] get_title failed status={}", output.status);
         return Err(DownloaderError::ProcessFailed(
             String::from_utf8_lossy(&output.stderr).to_string(),
         ));
@@ -28,8 +32,11 @@ fn get_title_impl(url: &str) -> Result<String, DownloaderError> {
         .to_string();
 
     if title.is_empty() {
+        debug_log!("[yt-dlp] get_title empty title");
         return Err(DownloaderError::ProcessFailed("empty title".to_string()));
     }
+
+    debug_log!("[yt-dlp] get_title ok title_len={}", title.len());
 
     Ok(title)
 }
@@ -47,6 +54,16 @@ impl DownloadPort for YtDlpAdapter {
         });
 
         let mut cmd = Command::new(yt_dlp_command());
+        debug_log!(
+            "[yt-dlp] run_download start url={} out={} mode={:?} preset={:?} vq={:?} aq={:?} ffmpeg={}",
+            request.url,
+            request.output_path,
+            request.mode,
+            request.preset,
+            request.video_quality,
+            request.audio_quality,
+            ffmpeg_path
+        );
         cmd.arg("--newline")
             .arg("--progress")
             .arg("--ffmpeg-location")
@@ -80,6 +97,7 @@ impl DownloadPort for YtDlpAdapter {
         let mut child = cmd
             .spawn()
             .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
+        debug_log!("[yt-dlp] run_download spawned pid={}", child.id());
 
         let stdout = child
             .stdout
@@ -101,12 +119,14 @@ impl DownloadPort for YtDlpAdapter {
             .wait()
             .map_err(|e| DownloaderError::ProcessFailed(e.to_string()))?;
         if status.success() {
+            debug_log!("[yt-dlp] run_download success status={}", status);
             on_progress(DownloadProgress {
                 fraction: 1.0,
                 message: "Finished".to_string(),
             });
             Ok(())
         } else {
+            debug_log!("[yt-dlp] run_download failed status={}", status);
             Err(DownloaderError::ProcessFailed(format!(
                 "yt-dlp exited with {status}"
             )))

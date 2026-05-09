@@ -1,9 +1,13 @@
 use std::sync::Arc;
+use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri::{AppHandle, Emitter};
 
+use crate::debug_log;
+use crate::debug_logs;
 use crate::modules::downloader::application::use_cases::{
     BootstrapDependenciesUseCase, DownloadMediaUseCase,
 };
@@ -25,7 +29,7 @@ pub struct DownloadRequestPayload {
     audio_quality: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DependencyReportPayload {
     yt_dlp: String,
@@ -54,6 +58,19 @@ impl From<DownloadProgress> for DownloadProgressPayload {
 struct DownloadCompletePayload {
     ok: bool,
     error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DebugLogEntryPayload {
+    id: u64,
+    message: String,
+}
+
+static BOOTSTRAPPED_DEPS: OnceLock<RwLock<Option<DependencyReportPayload>>> = OnceLock::new();
+
+fn deps_state() -> &'static RwLock<Option<DependencyReportPayload>> {
+    BOOTSTRAPPED_DEPS.get_or_init(|| RwLock::new(None))
 }
 
 impl DownloadRequestPayload {
@@ -108,7 +125,7 @@ fn parse_audio_quality(value: &str) -> Result<AudioQuality, String> {
 
 #[tauri::command]
 async fn bootstrap_dependencies() -> Result<DependencyReportPayload, String> {
-    eprintln!("[deps] bootstrap_dependencies: start");
+    debug_log!("[deps] bootstrap_dependencies: start");
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         let dep = Arc::new(SystemDependencies);
@@ -125,8 +142,17 @@ async fn bootstrap_dependencies() -> Result<DependencyReportPayload, String> {
     .await
     .map_err(|e| format!("dependency bootstrap panicked: {e}"))?;
 
-    eprintln!("[deps] bootstrap_dependencies: completed");
-    result
+    let report = result?;
+    if let Ok(mut guard) = deps_state().write() {
+        *guard = Some(report.clone());
+    }
+    debug_log!(
+        "[deps] bootstrap_dependencies: completed yt_dlp={} ffmpeg={} ffprobe={}",
+        report.yt_dlp,
+        report.ffmpeg,
+        report.ffprobe
+    );
+    Ok(report)
 }
 
 #[tauri::command]
@@ -135,15 +161,31 @@ fn open_github() {
 }
 
 #[tauri::command]
+fn get_debug_logs(since_id: Option<u64>) -> Vec<DebugLogEntryPayload> {
+    debug_logs::read_since(since_id.unwrap_or(0))
+        .into_iter()
+        .map(|entry| DebugLogEntryPayload {
+            id: entry.id,
+            message: entry.message,
+        })
+        .collect()
+}
+
+#[tauri::command]
 fn start_download(app: AppHandle, payload: DownloadRequestPayload) -> Result<(), String> {
     let request = payload.into_domain()?;
+    let ffmpeg_path = deps_state()
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|deps| deps.ffmpeg.clone()))
+        .ok_or_else(|| "dependencies not bootstrapped; restart app".to_string())?;
+
     tauri::async_runtime::spawn(async move {
-        let dependencies = Arc::new(SystemDependencies);
         let save = Arc::new(NativeSaveDialog);
         let yt_dlp = Arc::new(YtDlpAdapter);
-        let use_case = DownloadMediaUseCase::new(dependencies, save, yt_dlp);
+        let use_case = DownloadMediaUseCase::new(save, yt_dlp);
 
-        let result = use_case.execute(request, &mut |progress| {
+        let result = use_case.execute(request, &ffmpeg_path, &mut |progress| {
             let payload: DownloadProgressPayload = progress.into();
             let _ = app.emit("download-progress", payload);
         });
@@ -166,7 +208,7 @@ fn start_download(app: AppHandle, payload: DownloadRequestPayload) -> Result<(),
 }
 
 pub fn run() {
-    eprintln!("[startup] tauri_app::run starting");
+    debug_log!("[startup] tauri_app::run starting");
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -193,10 +235,17 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            let show_debug_logs = MenuItem::with_id(
+                app,
+                "show_debug_logs",
+                "Show Debug logs",
+                true,
+                None::<&str>,
+            )?;
             let file_menu = Submenu::with_items(app, "File", true, &[&close_window, &relaunch_app, &quit])?;
             let edit_menu =
                 Submenu::with_items(app, "Edit", true, &[&undo, &redo, &cut, &copy, &paste, &select_all])?;
-            let help_menu = Submenu::with_items(app, "Help", true, &[&check_for_updates])?;
+            let help_menu = Submenu::with_items(app, "Help", true, &[&check_for_updates, &show_debug_logs])?;
             let menu = Menu::with_items(app, &[&file_menu, &edit_menu, &help_menu])?;
             app.set_menu(menu)?;
 
@@ -207,10 +256,27 @@ pub fn run() {
                 let _ = app.emit("menu-check-for-updates", ());
             } else if event.id().as_ref() == "relaunch_app" {
                 let _ = app.emit("menu-relaunch-app", ());
+            } else if event.id().as_ref() == "show_debug_logs" {
+                if app.get_webview_window("debug-logs").is_none() {
+                    let _ = WebviewWindowBuilder::new(
+                        app,
+                        "debug-logs",
+                        WebviewUrl::App("index.html".into()),
+                    )
+                    .title("Pullyt Debug Logs")
+                    .inner_size(820.0, 520.0)
+                    .resizable(true)
+                    .build();
+                } else if let Some(win) = app.get_webview_window("debug-logs") {
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
+                debug_log!("[debug] opened debug logs window");
             }
         })
         .invoke_handler(tauri::generate_handler![
             bootstrap_dependencies,
+            get_debug_logs,
             open_github,
             start_download,
         ])

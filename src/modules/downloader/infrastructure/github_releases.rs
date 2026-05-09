@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::time::Duration;
 
+use crate::debug_log;
 use crate::modules::downloader::domain::entities::ReleaseInfo;
 use crate::modules::downloader::domain::errors::DownloaderError;
 use crate::modules::downloader::domain::ports::ReleasePort;
@@ -14,7 +15,7 @@ pub struct GitHubReleaseAdapter;
 
 impl ReleasePort for GitHubReleaseAdapter {
     fn fetch_latest_release(&self) -> Result<ReleaseInfo, DownloaderError> {
-        eprintln!("[updates] github: fetch_latest_release start");
+        debug_log!("[updates] github: fetch_latest_release start");
         let agent = ureq::AgentBuilder::new()
             .user_agent(USER_AGENT)
             .timeout_connect(Duration::from_secs(RELEASE_TIMEOUT_SECS))
@@ -22,7 +23,7 @@ impl ReleasePort for GitHubReleaseAdapter {
             .timeout_write(Duration::from_secs(RELEASE_TIMEOUT_SECS))
             .build();
 
-        eprintln!("[updates] github: requesting {LATEST_RELEASE_URL}");
+        debug_log!("[updates] github: requesting {LATEST_RELEASE_URL}");
         let response: LatestReleaseResponse = agent
             .get(LATEST_RELEASE_URL)
             .set("Accept", "application/vnd.github+json")
@@ -37,7 +38,7 @@ impl ReleasePort for GitHubReleaseAdapter {
             .unwrap_or(&response.tag_name)
             .to_string();
 
-        eprintln!(
+        debug_log!(
             "[updates] github: received release tag={} url={}",
             response.tag_name, response.html_url
         );

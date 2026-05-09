@@ -2,6 +2,7 @@
   import { getVersion } from "@tauri-apps/api/app";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
+  import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
   import { relaunch } from "@tauri-apps/plugin-process";
   import { check } from "@tauri-apps/plugin-updater";
   import { onDestroy, onMount } from "svelte";
@@ -32,6 +33,11 @@
   let unlistenComplete;
   let unlistenMenuCheckUpdates;
   let unlistenMenuRelaunchApp;
+  let debugPollingTimer;
+
+  let isDebugWindow = false;
+  let debugLogs = [];
+  let lastDebugLogId = 0;
 
   function withTimeout(promise, timeoutMs, timeoutMessage) {
     let timer;
@@ -224,7 +230,38 @@
     await invoke("open_github");
   }
 
+  async function pullDebugLogs() {
+    try {
+      const entries = await invoke("get_debug_logs", { sinceId: lastDebugLogId });
+      if (!entries?.length) {
+        return;
+      }
+
+      for (const entry of entries) {
+        debugLogs = [...debugLogs, `[${entry.id}] ${entry.message}`];
+        lastDebugLogId = Math.max(lastDebugLogId, entry.id);
+      }
+
+      if (debugLogs.length > 2000) {
+        debugLogs = debugLogs.slice(debugLogs.length - 2000);
+      }
+    } catch (error) {
+      debugLogs = [...debugLogs, `log read failed: ${String(error)}`];
+    }
+  }
+
   onMount(async () => {
+    const currentWindow = getCurrentWebviewWindow();
+    isDebugWindow = currentWindow.label === "debug-logs";
+
+    if (isDebugWindow) {
+      await pullDebugLogs();
+      debugPollingTimer = setInterval(() => {
+        void pullDebugLogs();
+      }, 500);
+      return;
+    }
+
     console.info("[startup] onMount");
 
     try {
@@ -299,10 +336,21 @@
     if (unlistenMenuRelaunchApp) {
       unlistenMenuRelaunchApp();
     }
+    if (debugPollingTimer) {
+      clearInterval(debugPollingTimer);
+    }
   });
 </script>
 
-<main class="shell">
+{#if isDebugWindow}
+  <main class="shell">
+    <section class="app-card">
+      <h2>Debug Logs</h2>
+      <pre class="log-view">{debugLogs.join("\n")}</pre>
+    </section>
+  </main>
+{:else}
+  <main class="shell">
   <section class="app-card">
     <img class="logo" src={logo} alt="Pullyt" />
 
@@ -357,6 +405,7 @@
     </footer>
   </section>
 </main>
+{/if}
 
 {#if confirmDialog.open}
   <div class="confirm-overlay" role="presentation">
